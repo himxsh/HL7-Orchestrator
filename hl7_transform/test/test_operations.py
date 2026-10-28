@@ -2,10 +2,10 @@
 Tests for hl7_transform.operations module.
 """
 import unittest
-from hl7_transform.operations import HL7Operation, GenerateCurrentDatetime, GenerateAplhanumericID, GenerateNumericID
+import warnings
+
 from hl7_transform.message import HL7Message
-from contextlib import redirect_stderr
-import io
+from hl7_transform.operations import HL7Operation, GenerateCurrentDatetime, GenerateAplhanumericID, GenerateNumericID
 
 
 class TestHL7Operation(unittest.TestCase):
@@ -25,10 +25,10 @@ class TestHL7Operation(unittest.TestCase):
     def test_execute(self):
         op = GenerateCurrentDatetime(['MSH.2'], {})
         msg = HL7Message.from_file('hl7_transform/test/test_transform.hl7')
-        s = io.StringIO()
-        with redirect_stderr(s):  # hides the warning message from output
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
             res1 = op.execute(msg)
-            self.assertIn('deprecated', s.getvalue())
+        self.assertTrue(any('deprecated' in str(item.message) for item in caught))
         res2 = op(msg)
         self.assertEqual(res1, res2)
 
@@ -44,4 +44,4 @@ class TestHL7Operation(unittest.TestCase):
         op = GenerateNumericID([field], {})
         msg = HL7Message.from_file('hl7_transform/test/test_transform.hl7')
         res = op(msg)
-        self.assertTrue(0 <= int(res) <= 1e9)
+        self.assertTrue(0 <= int(res) <= 1_000_000_000)

@@ -2,11 +2,15 @@
 A list of operations.
 """
 
-from hl7_transform.field import HL7Field
 import hashlib
 import random
 from datetime import datetime, timedelta
 from abc import ABC, abstractmethod
+
+from hl7_transform.field import HL7Field
+
+
+_NUMERIC_ID_UPPER_BOUND = 1_000_000_000
 
 
 class HL7Operation(ABC):
@@ -176,7 +180,9 @@ class GenerateNumericID(SetValue):
         ]
     """
     def __init__(self, source_fields, args):
-        args['value'] = '{:09}'.format(random.Random().randint(0, 1e9))
+        args['value'] = '{:09}'.format(
+            random.Random().randint(0, _NUMERIC_ID_UPPER_BOUND)
+        )
         SetValue.__init__(self, source_fields, args)
 
 
