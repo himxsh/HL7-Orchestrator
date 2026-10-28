@@ -22,7 +22,7 @@ setup(
   download_url = f'https://github.com/{account_name}/hl7_transform/archive/v.{version}.tar.gz',
   keywords = ['HL7', 'hospital IT', 'infrastructure', 'message', 'transform'],
   python_requires='>=3',
-  install_requires=['hl7apy',],
+  install_requires=['hl7apy', 'pycryptodome>=3.20.0'],
   classifiers=[
     'Development Status :: 4 - Beta',
     'Intended Audience :: System Administrators',

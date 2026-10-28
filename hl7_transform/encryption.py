@@ -9,6 +9,7 @@ Algorithms
 ----------
 1. **SHA-256** — NIST FIPS 180-4 hash (IT Act §14 compliance).
 2. **AES-256-CBC** — Symmetric encryption at rest (IT Act §43A).
+   PyCryptodome is required. There is no hash-based stand-in.
 3. **HMAC-SHA512** — Keyed-hash for authentication + integrity
    (DPDP §8(7) assurance).
 4. **SHA3-256** — Keccak-family hash (future-proof per IS/ISO 27001).
@@ -34,13 +35,8 @@ import time
 from dataclasses import dataclass
 from typing import List
 
-# AES support via PyCryptodome or fallback
-try:
-    from Crypto.Cipher import AES
-    from Crypto.Util.Padding import pad
-    HAS_CRYPTO = True
-except ImportError:
-    HAS_CRYPTO = False
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad
 
 logger = logging.getLogger("hl7_pipeline.encryption")
 
@@ -154,34 +150,20 @@ class EncryptionComparator:
     def _run_aes_256(data: bytes) -> AlgorithmResult:
         start = time.perf_counter()
         aes_key = _get_aes_key()
-        if HAS_CRYPTO:
-            iv = os.urandom(16)
-            cipher = AES.new(aes_key, AES.MODE_CBC, iv)
-            ct = cipher.encrypt(pad(data, AES.block_size))
-            output_hex = (iv + ct).hex()
-            algo_name = "AES-256-CBC"
-            algo_type = "cipher"
-        else:
-            # Fallback: PyCryptodome not installed — clearly mark as unavailable
-            logger.warning(
-                "[EncryptionComparator] PyCryptodome not installed. "
-                "AES-256-CBC is UNAVAILABLE. Using SHA-512 simulation for demo only."
-            )
-            h = hashlib.sha512(data + aes_key).hexdigest()
-            output_hex = h * (len(data) // len(h) + 1)
-            output_hex = output_hex[:len(data) * 2]  # approx size
-            algo_name = "AES-256-CBC (UNAVAILABLE — SHA-512 SIMULATION)"
-            algo_type = "simulation"
+        iv = os.urandom(16)
+        cipher = AES.new(aes_key, AES.MODE_CBC, iv)
+        ciphertext = cipher.encrypt(pad(data, AES.block_size))
+        output_hex = (iv + ciphertext).hex()
         elapsed = (time.perf_counter() - start) * 1000
 
         return AlgorithmResult(
-            name=algo_name,
+            name="AES-256-CBC",
             time_ms=round(elapsed, 4),
             output_size_bytes=len(output_hex) // 2,
             digest_preview=output_hex[:16],
             full_digest=output_hex[:64] + "...",
             legal_reference="IT Act §43A (Reasonable Security Practices)",
-            algorithm_type=algo_type,
+            algorithm_type="cipher",
             key_size_bits=256,
         )
 
