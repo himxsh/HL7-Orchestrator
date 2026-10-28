@@ -13,6 +13,9 @@ import { ComplianceScoreContent } from './ComplianceScore';
 import { DataLineageContent } from './DataLineagePage';
 import { RiskAssessmentContent } from './RiskAssessment';
 import { AccessControlContent } from './AccessControl';
+import { FhirExportContent } from './FhirExport';
+import { PhiReportContent } from './PhiReport';
+import { PseudonymVaultContent } from './PseudonymVault';
 
 // --- Shared Components & Utils ---
 
@@ -36,8 +39,11 @@ const eventIcons: Record<string, string> = {
   PIPELINE_END: '🏁',
 };
 
-const TABS = (runId?: string | null) => [
+const TABS = (runId?: string | null, hl7Text?: string) => [
   { id: 'encryption', label: 'Encryption', component: () => <EncryptionComparisonContent isModal={true} runId={runId} /> },
+  { id: 'fhir', label: 'FHIR R4', component: () => <FhirExportContent isModal hl7Text={hl7Text} /> },
+  { id: 'phi', label: 'PHI Report', component: () => <PhiReportContent isModal hl7Text={hl7Text} /> },
+  { id: 'vault', label: 'Vault', component: () => <PseudonymVaultContent isModal /> },
   { id: 'audit', label: 'Audit Log', component: () => <AuditLogContent isModal={true} /> },
   { id: 'breach', label: 'Breach Detection', component: () => <BreachDetectionContent isModal={true} /> },
   { id: 'compliance', label: 'Compliance', component: () => <ComplianceScoreContent isModal={true} /> },
@@ -46,9 +52,13 @@ const TABS = (runId?: string | null) => [
   { id: 'access', label: 'Access Control', component: () => <AccessControlContent isModal={true} /> },
 ];
 
-export default function SecurityModal({ isOpen, onClose, runId }: { isOpen: boolean, onClose: () => void, runId?: string | null }) {
-  const [activeTab, setActiveTab] = useState('encryption');
-  const tabs = TABS(runId);
+export default function SecurityModal({ isOpen, onClose, runId, initialTab = 'encryption', hl7Text = '' }: { isOpen: boolean, onClose: () => void, runId?: string | null, initialTab?: string, hl7Text?: string }) {
+  const [activeTab, setActiveTab] = useState(initialTab);
+  const tabs = TABS(runId, hl7Text);
+
+  useEffect(() => {
+    if (isOpen) setActiveTab(initialTab);
+  }, [isOpen, initialTab]);
 
   if (!isOpen) return null;
 

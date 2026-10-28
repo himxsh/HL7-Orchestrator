@@ -4,6 +4,7 @@ import { ShieldCheck, BookOpen, Scale, Shield, Heart, Globe } from 'lucide-react
 import Header from './Header';
 import Footer from './Footer';
 import { useState, useEffect } from 'react';
+import { fetchWithAuth } from './api';
 
 export default function LandingPage() {
   const navigate = useNavigate();
@@ -19,9 +20,10 @@ export default function LandingPage() {
   });
 
   useEffect(() => {
-    fetch('/api/stats')
-      .then(res => res.json())
+    fetchWithAuth('/api/stats')
+      .then(res => (res.ok ? res.json() : null))
       .then(data => {
+        if (!data) return;
         setStats({
           legal_sections: data.legal_sections.toString(),
           offences: data.offences.toString(),

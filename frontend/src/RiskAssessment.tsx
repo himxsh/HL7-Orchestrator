@@ -3,6 +3,7 @@ import { AlertTriangle, Shield, RefreshCw } from 'lucide-react';
 import Header from './Header';
 import Footer from './Footer';
 import { useState, useEffect } from 'react';
+import { fetchWithAuth } from './api';
 
 interface Threat {
   id: string;
@@ -48,7 +49,8 @@ export const RiskAssessmentContent = ({ isModal = false }: { isModal?: boolean }
   const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/risk-assessment');
+      const res = await fetchWithAuth('/api/risk-assessment');
+      if (!res.ok) return;
       setData(await res.json());
     } catch { } finally { setLoading(false); }
   };

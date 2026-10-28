@@ -27,6 +27,9 @@ import ComplianceScore from './ComplianceScore';
 import DataLineagePage from './DataLineagePage';
 import RiskAssessment from './RiskAssessment';
 import AccessControl from './AccessControl';
+import FhirExport from './FhirExport';
+import PhiReport from './PhiReport';
+import PseudonymVault from './PseudonymVault';
 
 const router = createBrowserRouter([
   { path: "/", element: <LandingPage /> },
@@ -52,6 +55,9 @@ const router = createBrowserRouter([
   { path: "/data-lineage", element: <DataLineagePage /> },
   { path: "/risk-assessment", element: <RiskAssessment /> },
   { path: "/access-control", element: <AccessControl /> },
+  { path: "/fhir", element: <FhirExport /> },
+  { path: "/phi", element: <PhiReport /> },
+  { path: "/vault", element: <PseudonymVault /> },
   { path: "*", element: <Navigate to="/" replace /> },
 ]);
 

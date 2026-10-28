@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, UploadFile, File, Header as FastAPIHeader
+from fastapi import Depends, FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -29,7 +29,11 @@ from hl7_transform.compliance_scorer import ComplianceScorer
 from hl7_transform.data_lineage import DataLineageTracker
 from hl7_transform.risk_assessment import RiskAssessor
 from hl7_transform.access_control import AccessControlSimulator
+from hl7_transform.fhir_export import hl7_to_fhir_bundle
+from hl7_transform.phi_report import build_phi_report
+from hl7_transform.pseudonym_vault import PseudonymVault, VaultError
 from preprocess_mimic import preprocess
+from security import ApiRole, require_admin_role, require_operator_role
 
 app = FastAPI()
 logger = logging.getLogger("hl7_pipeline.app")
@@ -39,7 +43,6 @@ logger = logging.getLogger("hl7_pipeline.app")
 # ---------------------------------------------------------------------------
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_MB", "5")) * 1024 * 1024  # 5MB default
 CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",")
-_ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", None)
 
 # Stateless working directory (created per-run, cleaned after)
 TEMP_ROOT = Path("temp")
@@ -61,6 +64,7 @@ compliance_scorer = ComplianceScorer()
 data_lineage = DataLineageTracker()
 risk_assessor = RiskAssessor()
 access_control = AccessControlSimulator()
+vault = PseudonymVault.from_env()
 
 # ---------------------------------------------------------------------------
 # Short-lived download store (token → ZIP bytes, auto-expire after 15 min)
@@ -136,6 +140,25 @@ class Record(BaseModel):
     seal: str
 
 
+class FhirExportRequest(BaseModel):
+    hl7: str
+
+
+class PhiReportRequest(BaseModel):
+    hl7: Optional[str] = None
+    csv: Optional[str] = None
+
+
+class VaultEnrollRequest(BaseModel):
+    subject_id: str
+    original_name: str
+
+
+class VaultRevealRequest(BaseModel):
+    subject_id: str
+    reason: str
+
+
 # ---------------------------------------------------------------------------
 # Health Check
 # ---------------------------------------------------------------------------
@@ -161,7 +184,10 @@ async def get_datasets():
 # ---------------------------------------------------------------------------
 
 @app.post("/api/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(
+    file: UploadFile = File(...),
+    _role: ApiRole = Depends(require_operator_role),
+):
     """Upload a file for processing. Files are saved to a temp directory and
     deleted after processing completes. Max 5MB per file.
 
@@ -211,7 +237,11 @@ async def upload_file(file: UploadFile = File(...)):
 
 
 @app.post("/api/upload/{run_id}")
-async def upload_file_to_run(run_id: str, file: UploadFile = File(...)):
+async def upload_file_to_run(
+    run_id: str,
+    file: UploadFile = File(...),
+    _role: ApiRole = Depends(require_operator_role),
+):
     """Upload additional files to an existing run directory (for MIMIC 3-file upload).
 
     [DPDP Act §8(1)] — Data collected only for declared processing purpose.
@@ -246,7 +276,10 @@ async def upload_file_to_run(run_id: str, file: UploadFile = File(...)):
 # Batch Pipeline — SSE streaming (stateless)
 # ---------------------------------------------------------------------------
 @app.post("/api/run")
-async def run_pipeline(config: RunConfig):
+async def run_pipeline(
+    config: RunConfig,
+    _role: ApiRole = Depends(require_operator_role),
+):
     """Run the HL7 transformation pipeline on uploaded files.
     Streams results via SSE. At completion, emits a download token for the ZIP.
     All temp files are deleted after the ZIP is built.
@@ -558,7 +591,10 @@ def _build_and_store_zip(out_dir: Path) -> str:
 # ZIP Download (token-based, one-time use)
 # ---------------------------------------------------------------------------
 @app.get("/api/download/{token}")
-async def download_zip(token: str):
+async def download_zip(
+    token: str,
+    _role: ApiRole = Depends(require_operator_role),
+):
     """Serve the ZIP for a given download token, then invalidate it.
 
     [DPDP §8(7)] — Data minimisation: download tokens are single-use.
@@ -582,7 +618,10 @@ async def download_zip(token: str):
 # Single Patient Processing — SSE streaming (same UX as batch mode)
 # ---------------------------------------------------------------------------
 @app.post("/api/run-single")
-async def run_single_patient(request: SinglePatientRequest):
+async def run_single_patient(
+    request: SinglePatientRequest,
+    _role: ApiRole = Depends(require_operator_role),
+):
     """Stream single-patient HL7 generation via SSE so the Dashboard
     can display identical pipeline stages as batch mode.
 
@@ -709,7 +748,10 @@ async def run_single_patient(request: SinglePatientRequest):
 # Single Patient Processing — direct response (legacy, kept for API compat)
 # ---------------------------------------------------------------------------
 @app.post("/api/process-single")
-async def process_single_patient(request: SinglePatientRequest):
+async def process_single_patient(
+    request: SinglePatientRequest,
+    _role: ApiRole = Depends(require_operator_role),
+):
     """Generate a signed HL7 message from manually entered patient fields.
     No files are read or written — everything is in-memory.
 
@@ -798,7 +840,10 @@ async def process_single_patient(request: SinglePatientRequest):
 # HL7 Content Viewer (reads from download store, not disk)
 # ---------------------------------------------------------------------------
 @app.get("/api/hl7/{filename}")
-async def get_hl7_content(filename: str):
+async def get_hl7_content(
+    filename: str,
+    _role: ApiRole = Depends(require_operator_role),
+):
     """Serve HL7 content. In stateless mode, files may no longer be on disk
     after the run completes. This endpoint is used during active SSE streams
     when temp files still exist.
@@ -820,7 +865,9 @@ async def get_hl7_content(filename: str):
 # Existing endpoints (unchanged)
 # ---------------------------------------------------------------------------
 @app.get("/api/logs")
-async def get_logs():
+async def get_logs(
+    _role: ApiRole = Depends(require_operator_role),
+):
     log_file = Path("pipeline.log")
     if not log_file.exists():
         return {"logs": []}
@@ -830,7 +877,10 @@ async def get_logs():
 
 
 @app.get("/api/encryption-comparison")
-async def get_encryption_comparison(run_id: Optional[str] = None):
+async def get_encryption_comparison(
+    run_id: Optional[str] = None,
+    _role: ApiRole = Depends(require_operator_role),
+):
     """Return encryption comparison algorithms info."""
     results = []
     if run_id:
@@ -843,7 +893,12 @@ async def get_encryption_comparison(run_id: Optional[str] = None):
 
 
 @app.get("/api/audit-log")
-async def get_audit_log(event_type: Optional[str] = None, severity: Optional[str] = None, limit: int = 100):
+async def get_audit_log(
+    event_type: Optional[str] = None,
+    severity: Optional[str] = None,
+    limit: int = 100,
+    _role: ApiRole = Depends(require_operator_role),
+):
     """Return structured audit log entries with optional filtering."""
     entries = audit_logger.get_entries(event_type=event_type, severity=severity, limit=limit)
     stats = audit_logger.get_stats()
@@ -854,12 +909,10 @@ async def get_audit_log(event_type: Optional[str] = None, severity: Optional[str
 
 
 @app.post("/api/audit-log/clear")
-async def clear_audit_log(authorization: Optional[str] = FastAPIHeader(default=None)):
+async def clear_audit_log(
+    _role: ApiRole = Depends(require_admin_role),
+):
     """Clear the audit log. Requires admin authorization."""
-    if not _ADMIN_TOKEN:
-        raise HTTPException(status_code=403, detail="Audit log clearing is disabled (no ADMIN_TOKEN configured)")
-    if authorization != f"Bearer {_ADMIN_TOKEN}":
-        raise HTTPException(status_code=401, detail="Unauthorized: valid admin token required")
     audit_logger.clear()
     audit_logger.log(
         event_type="AUDIT_LOG_CLEARED",
@@ -871,7 +924,9 @@ async def clear_audit_log(authorization: Optional[str] = FastAPIHeader(default=N
 
 
 @app.post("/api/breach-scan")
-async def run_breach_scan():
+async def run_breach_scan(
+    _role: ApiRole = Depends(require_operator_role),
+):
     """Run a full breach detection scan on any active temp output directories."""
     audit_logger.log(
         event_type="BREACH_SCAN_START",
@@ -897,7 +952,9 @@ async def run_breach_scan():
 
 
 @app.get("/api/compliance-score")
-async def get_compliance_score():
+async def get_compliance_score(
+    _role: ApiRole = Depends(require_operator_role),
+):
     """Calculate real-time compliance score across all pipeline controls."""
     return compliance_scorer.score(
         has_anonymizer=True,
@@ -910,43 +967,61 @@ async def get_compliance_score():
 
 
 @app.get("/api/data-lineage")
-async def get_data_lineage():
+async def get_data_lineage(
+    _role: ApiRole = Depends(require_operator_role),
+):
     """Return the complete data lineage graph."""
     return data_lineage.get_lineage()
 
 
 @app.get("/api/data-lineage/{field_name}")
-async def get_field_lineage(field_name: str):
+async def get_field_lineage(
+    field_name: str,
+    _role: ApiRole = Depends(require_operator_role),
+):
     """Trace lineage for a specific field."""
     return data_lineage.get_field_lineage(field_name)
 
 
 @app.get("/api/risk-assessment")
-async def get_risk_assessment():
+async def get_risk_assessment(
+    _role: ApiRole = Depends(require_operator_role),
+):
     """Return the complete risk assessment matrix."""
     return risk_assessor.assess()
 
 
 @app.get("/api/access-control")
-async def get_access_control():
+async def get_access_control(
+    _role: ApiRole = Depends(require_operator_role),
+):
     """Return all RBAC roles and permissions."""
     return access_control.get_roles()
 
 
 @app.get("/api/access-control/matrix")
-async def get_access_matrix():
+async def get_access_matrix(
+    _role: ApiRole = Depends(require_operator_role),
+):
     """Return the roles × resources access matrix."""
     return access_control.get_access_matrix()
 
 
 @app.get("/api/access-control/check")
-async def check_access(role: str, resource: str, action: str = "read"):
+async def check_access(
+    role: str,
+    resource: str,
+    action: str = "read",
+    _role: ApiRole = Depends(require_operator_role),
+):
     """Check if a role has access to a resource."""
     return access_control.check_access(role, resource, action)
 
 
 @app.get("/api/stats")
-async def get_stats():
+async def get_stats(
+    _role: ApiRole = Depends(require_operator_role),
+):
     """Return aggregated stats for the landing page."""
     risk = risk_assessor.assess()
     score = compliance_scorer.score(
@@ -963,6 +1038,99 @@ async def get_stats():
         "risk_threats": risk["summary"]["total"],
         "system_state": "SECURE" if score["overall_score"] > 80 else "WARNING"
     }
+
+
+# ---------------------------------------------------------------------------
+# FHIR R4 export, PHI confidence report, pseudonym vault
+# ---------------------------------------------------------------------------
+@app.post("/api/fhir/export")
+async def export_fhir(
+    request: FhirExportRequest,
+    _role: ApiRole = Depends(require_operator_role),
+):
+    """Export one transformed HL7 message as a FHIR R4 collection Bundle."""
+    try:
+        bundle = hl7_to_fhir_bundle(request.hl7)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    audit_logger.log(
+        event_type="FHIR_EXPORT",
+        details={"resources": len(bundle.get("entry", []))},
+        legal_reference="DPDP §8(7) (Export of de-identified record)",
+        severity="INFO",
+    )
+    return bundle
+
+
+@app.post("/api/phi-report")
+async def phi_report(
+    request: PhiReportRequest,
+    _role: ApiRole = Depends(require_operator_role),
+):
+    """Score PHI confidence for each field of an HL7 message or CSV."""
+    try:
+        report = build_phi_report(hl7=request.hl7, csv_text=request.csv)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    audit_logger.log(
+        event_type="PHI_REPORT",
+        details={
+            "source": report["source"],
+            "likely_phi": report["summary"]["likely_phi"],
+            "fields_scanned": report["summary"]["fields_scanned"],
+        },
+        legal_reference="DPDP §8(4) (Data minimisation)",
+        severity="INFO",
+    )
+    return report
+
+
+@app.get("/api/vault")
+async def vault_snapshot(_role: ApiRole = Depends(require_operator_role)):
+    """List enrolled pseudonyms and the reveal audit log. No plaintext."""
+    return vault.snapshot()
+
+
+@app.post("/api/vault/enroll")
+async def vault_enroll(
+    request: VaultEnrollRequest,
+    role: ApiRole = Depends(require_operator_role),
+):
+    """Store an original name as ciphertext and return the pipeline pseudonym."""
+    try:
+        result = vault.enroll(request.subject_id, request.original_name, actor=role.value)
+    except VaultError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    audit_logger.log(
+        event_type="VAULT_ENROLL",
+        subject_id=result["subject_id"],
+        details={"pseudonym": result["pseudonym"], "updated": result["updated"]},
+        legal_reference="DPDP §8(7) (Pseudonymisation)",
+        severity="INFO",
+    )
+    return result
+
+
+@app.post("/api/vault/reveal")
+async def vault_reveal(
+    request: VaultRevealRequest,
+    role: ApiRole = Depends(require_admin_role),
+):
+    """Decrypt one original name. Admin only. The reason is audited."""
+    try:
+        result = vault.reveal(request.subject_id, request.reason, actor=role.value)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Subject is not enrolled")
+    except VaultError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    audit_logger.log(
+        event_type="VAULT_REVEAL",
+        subject_id=result["subject_id"],
+        details={"reason": result["reason"], "actor": role.value},
+        legal_reference="IT Act §72A (Disclosure of identity)",
+        severity="WARNING",
+    )
+    return result
 
 
 # ---------------------------------------------------------------------------

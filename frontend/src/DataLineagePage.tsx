@@ -3,6 +3,7 @@ import { GitBranch, ArrowRight, Search } from 'lucide-react';
 import Header from './Header';
 import Footer from './Footer';
 import { useState, useEffect } from 'react';
+import { fetchWithAuth } from './api';
 
 interface LineageNode {
   field: string;
@@ -54,13 +55,17 @@ export const DataLineageContent = ({ isModal = false }: { isModal?: boolean }) =
   const [fieldLineage, setFieldLineage] = useState<{ upstream: LineageEdge[], downstream: LineageEdge[] } | null>(null);
 
   useEffect(() => {
-    fetch('/api/data-lineage').then(r => r.json()).then(setData).catch(() => {});
+    fetchWithAuth('/api/data-lineage').then(async (r) => {
+      if (!r.ok) return;
+      setData(await r.json());
+    }).catch(() => {});
   }, []);
 
   const selectField = async (field: string) => {
     setSelectedField(field);
     try {
-      const res = await fetch(`/api/data-lineage/${field}`);
+      const res = await fetchWithAuth(`/api/data-lineage/${field}`);
+      if (!res.ok) return;
       const json = await res.json();
       setFieldLineage(json);
     } catch {}

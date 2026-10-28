@@ -4,6 +4,7 @@ import { Lock, Unlock, Users, Shield, ShieldAlert, User } from 'lucide-react';
 import Header from './Header';
 import Footer from './Footer';
 import { useState, useEffect } from 'react';
+import { fetchWithAuth } from './api';
 
 interface Permission {
   resource: string;
@@ -48,7 +49,9 @@ export const AccessControlContent = ({ isModal = false }: { isModal?: boolean })
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/access-control').then(r => r.json()).then(d => {
+    fetchWithAuth('/api/access-control').then(async (r) => {
+      if (!r.ok) return;
+      const d = await r.json();
       setData(d);
       if (d.roles.length > 0) setSelectedRole(d.roles[0].id);
     }).catch(() => {});

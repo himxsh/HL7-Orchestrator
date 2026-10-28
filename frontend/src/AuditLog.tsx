@@ -3,6 +3,7 @@ import { FileText, Clock, Filter, RefreshCw, Trash2 } from 'lucide-react';
 import Header from './Header';
 import Footer from './Footer';
 import { useState, useEffect } from 'react';
+import { fetchWithAuth } from './api';
 
 interface AuditEntry {
   timestamp: string;
@@ -53,7 +54,8 @@ export const AuditLogContent = ({ isModal = false }: { isModal?: boolean }) => {
       const params = new URLSearchParams();
       if (filter !== 'all') params.set('event_type', filter);
       params.set('limit', isModal ? '50' : '200');
-      const res = await fetch(`/api/audit-log?${params}`);
+      const res = await fetchWithAuth(`/api/audit-log?${params}`);
+      if (!res.ok) return;
       const json = await res.json();
       setEntries(json.entries || []);
       setStats(json.stats || null);
@@ -63,7 +65,7 @@ export const AuditLogContent = ({ isModal = false }: { isModal?: boolean }) => {
   const clearLog = async () => {
     if (!confirm('Are you sure you want to clear the audit log? This cannot be undone.')) return;
     try {
-      await fetch('/api/audit-log/clear', { method: 'POST' });
+      await fetchWithAuth('/api/audit-log/clear', { method: 'POST' });
       fetchData();
     } catch { }
   };
