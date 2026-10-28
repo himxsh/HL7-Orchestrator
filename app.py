@@ -29,6 +29,9 @@ from hl7_transform.compliance_scorer import ComplianceScorer
 from hl7_transform.data_lineage import DataLineageTracker
 from hl7_transform.risk_assessment import RiskAssessor
 from hl7_transform.access_control import AccessControlSimulator
+from hl7_transform.fhir_export import hl7_to_fhir_bundle
+from hl7_transform.phi_report import build_phi_report
+from hl7_transform.pseudonym_vault import PseudonymVault, VaultError
 from preprocess_mimic import preprocess
 from security import ApiRole, require_admin_role, require_operator_role
 
@@ -61,6 +64,7 @@ compliance_scorer = ComplianceScorer()
 data_lineage = DataLineageTracker()
 risk_assessor = RiskAssessor()
 access_control = AccessControlSimulator()
+vault = PseudonymVault.from_env()
 
 # ---------------------------------------------------------------------------
 # Short-lived download store (token → ZIP bytes, auto-expire after 15 min)
@@ -134,6 +138,25 @@ class Record(BaseModel):
     labEvents: int
     output: str
     seal: str
+
+
+class FhirExportRequest(BaseModel):
+    hl7: str
+
+
+class PhiReportRequest(BaseModel):
+    hl7: Optional[str] = None
+    csv: Optional[str] = None
+
+
+class VaultEnrollRequest(BaseModel):
+    subject_id: str
+    original_name: str
+
+
+class VaultRevealRequest(BaseModel):
+    subject_id: str
+    reason: str
 
 
 # ---------------------------------------------------------------------------
@@ -1015,6 +1038,99 @@ async def get_stats(
         "risk_threats": risk["summary"]["total"],
         "system_state": "SECURE" if score["overall_score"] > 80 else "WARNING"
     }
+
+
+# ---------------------------------------------------------------------------
+# FHIR R4 export, PHI confidence report, pseudonym vault
+# ---------------------------------------------------------------------------
+@app.post("/api/fhir/export")
+async def export_fhir(
+    request: FhirExportRequest,
+    _role: ApiRole = Depends(require_operator_role),
+):
+    """Export one transformed HL7 message as a FHIR R4 collection Bundle."""
+    try:
+        bundle = hl7_to_fhir_bundle(request.hl7)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    audit_logger.log(
+        event_type="FHIR_EXPORT",
+        details={"resources": len(bundle.get("entry", []))},
+        legal_reference="DPDP §8(7) (Export of de-identified record)",
+        severity="INFO",
+    )
+    return bundle
+
+
+@app.post("/api/phi-report")
+async def phi_report(
+    request: PhiReportRequest,
+    _role: ApiRole = Depends(require_operator_role),
+):
+    """Score PHI confidence for each field of an HL7 message or CSV."""
+    try:
+        report = build_phi_report(hl7=request.hl7, csv_text=request.csv)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    audit_logger.log(
+        event_type="PHI_REPORT",
+        details={
+            "source": report["source"],
+            "likely_phi": report["summary"]["likely_phi"],
+            "fields_scanned": report["summary"]["fields_scanned"],
+        },
+        legal_reference="DPDP §8(4) (Data minimisation)",
+        severity="INFO",
+    )
+    return report
+
+
+@app.get("/api/vault")
+async def vault_snapshot(_role: ApiRole = Depends(require_operator_role)):
+    """List enrolled pseudonyms and the reveal audit log. No plaintext."""
+    return vault.snapshot()
+
+
+@app.post("/api/vault/enroll")
+async def vault_enroll(
+    request: VaultEnrollRequest,
+    role: ApiRole = Depends(require_operator_role),
+):
+    """Store an original name as ciphertext and return the pipeline pseudonym."""
+    try:
+        result = vault.enroll(request.subject_id, request.original_name, actor=role.value)
+    except VaultError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    audit_logger.log(
+        event_type="VAULT_ENROLL",
+        subject_id=result["subject_id"],
+        details={"pseudonym": result["pseudonym"], "updated": result["updated"]},
+        legal_reference="DPDP §8(7) (Pseudonymisation)",
+        severity="INFO",
+    )
+    return result
+
+
+@app.post("/api/vault/reveal")
+async def vault_reveal(
+    request: VaultRevealRequest,
+    role: ApiRole = Depends(require_admin_role),
+):
+    """Decrypt one original name. Admin only. The reason is audited."""
+    try:
+        result = vault.reveal(request.subject_id, request.reason, actor=role.value)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Subject is not enrolled")
+    except VaultError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    audit_logger.log(
+        event_type="VAULT_REVEAL",
+        subject_id=result["subject_id"],
+        details={"reason": result["reason"], "actor": role.value},
+        legal_reference="IT Act §72A (Disclosure of identity)",
+        severity="WARNING",
+    )
+    return result
 
 
 # ---------------------------------------------------------------------------

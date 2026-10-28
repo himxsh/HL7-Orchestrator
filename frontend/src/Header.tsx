@@ -9,7 +9,7 @@ import { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Menu, Moon, Sun, X } from 'lucide-react';
 import { getStoredTheme, toggleTheme, type ThemeMode } from './theme';
 
-type TabId = 'home' | 'pipeline' | 'architecture' | 'compliance' | 'legal-framework' | 'digital-signatures' | 'gdpr' | 'healthcare' | 'case-studies' | 'data-lifecycle' | 'data-classification' | 'penalties' | 'consent' | 'encryption' | 'audit-log' | 'breach-detection' | 'compliance-score' | 'data-lineage' | 'risk-assessment' | 'access-control';
+type TabId = 'home' | 'pipeline' | 'architecture' | 'compliance' | 'legal-framework' | 'digital-signatures' | 'gdpr' | 'healthcare' | 'case-studies' | 'data-lifecycle' | 'data-classification' | 'penalties' | 'consent' | 'encryption' | 'audit-log' | 'breach-detection' | 'compliance-score' | 'data-lineage' | 'risk-assessment' | 'access-control' | 'fhir-export' | 'phi-report' | 'pseudonym-vault';
 
 interface HeaderProps {
   activeTab?: TabId;
@@ -17,21 +17,27 @@ interface HeaderProps {
 
 export default function Header({ activeTab }: HeaderProps) {
   const [legalOpen, setLegalOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>(() => getStoredTheme());
   const legalRef = useRef<HTMLDivElement>(null);
+  const toolsRef = useRef<HTMLDivElement>(null);
   const { pathname } = useLocation();
 
   useEffect(() => {
     window.scrollTo(0, 0);
     setMobileOpen(false);
     setLegalOpen(false);
+    setToolsOpen(false);
   }, [pathname]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (legalRef.current && !legalRef.current.contains(e.target as Node)) {
         setLegalOpen(false);
+      }
+      if (toolsRef.current && !toolsRef.current.contains(e.target as Node)) {
+        setToolsOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -67,7 +73,14 @@ export default function Header({ activeTab }: HeaderProps) {
     { id: 'consent', label: 'Consent Management', path: '/consent' },
   ];
 
+  const toolPages = [
+    { id: 'fhir-export', label: 'FHIR R4 Export', path: '/fhir' },
+    { id: 'phi-report', label: 'PHI Report', path: '/phi' },
+    { id: 'pseudonym-vault', label: 'Pseudonym Vault', path: '/vault' },
+  ];
+
   const isLegalActive = legalPages.some(p => p.id === activeTab);
+  const isToolsActive = toolPages.some(p => p.id === activeTab);
 
   return (
     <header className="fixed top-0 w-full z-50 bg-bg-light/80 backdrop-blur-md border-b border-gold/10">
@@ -143,6 +156,48 @@ export default function Header({ activeTab }: HeaderProps) {
             </AnimatePresence>
           </div>
 
+          <div className="relative" ref={toolsRef}>
+            <button
+              onClick={() => { setToolsOpen(!toolsOpen); }}
+              className={`relative py-1 transition-colors hover:text-gold flex items-center gap-1 ${isToolsActive ? 'text-gold' : ''}`}
+            >
+              Tools
+              <ChevronDown size={12} className={`transition-transform ${toolsOpen ? 'rotate-180' : ''}`} />
+              {isToolsActive && (
+                <motion.div
+                  layoutId="header-underline"
+                  className="absolute bottom-0 left-0 right-0 h-px bg-gold"
+                  transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                />
+              )}
+            </button>
+            <AnimatePresence>
+              {toolsOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ duration: 0.15 }}
+                  className="absolute top-full right-0 mt-3 w-56 bg-white border border-gold/20 shadow-xl shadow-black/5 py-2 z-50"
+                >
+                  {toolPages.map((page) => (
+                    <Link
+                      key={page.id}
+                      to={page.path}
+                      onClick={() => {
+                        window.scrollTo(0, 0);
+                        setToolsOpen(false);
+                      }}
+                      className={`block px-5 py-2.5 text-[10px] uppercase tracking-[0.15em] transition-all hover:bg-gold/5 hover:text-gold ${activeTab === page.id ? 'text-gold bg-gold/5' : 'text-slate-600'}`}
+                    >
+                      {page.label}
+                    </Link>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
         </nav>
         <div className="flex items-center gap-6">
           <button
@@ -186,6 +241,22 @@ export default function Header({ activeTab }: HeaderProps) {
                   {item.label}
                 </Link>
               ))}
+
+              <div className="mt-2 pt-3 border-t border-gold/10">
+                <div className="px-3 pb-2 text-[9px] tracking-[0.22em] text-slate-400">Tools</div>
+                <div className="flex flex-col gap-1">
+                  {toolPages.map((page) => (
+                    <Link
+                      key={page.id}
+                      to={page.path}
+                      onClick={() => window.scrollTo(0, 0)}
+                      className={`px-3 py-3 rounded-sm transition-colors ${activeTab === page.id ? 'bg-gold/10 text-gold' : 'hover:bg-gold/5'}`}
+                    >
+                      {page.label}
+                    </Link>
+                  ))}
+                </div>
+              </div>
 
               <div className="mt-2 pt-3 border-t border-gold/10">
                 <div className="px-3 pb-2 text-[9px] tracking-[0.22em] text-slate-400">Legal</div>

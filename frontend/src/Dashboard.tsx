@@ -107,6 +107,7 @@ export default function Dashboard() {
   const [tableHeaders, setTableHeaders] = useState<string[]>([]);
   const [validationLogs, setValidationLogs] = useState<{time: string, file: string, status: string}[]>([]);
   const [isSecurityModalOpen, setIsSecurityModalOpen] = useState(false);
+  const [securityTab, setSecurityTab] = useState('encryption');
   const [showExitWarning, setShowExitWarning] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [downloadToken, setDownloadToken] = useState<string | null>(null);
@@ -495,11 +496,29 @@ export default function Dashboard() {
 
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 lg:gap-8">
             <section className="xl:col-span-7 glass-panel flex flex-col min-w-0">
-              <div className="p-4 border-b border-ui-border flex justify-between items-center bg-charcoal-light/20">
-                <div className="flex items-center space-x-2">
-                  <Terminal size={14} className="text-gold" />
+              <div className="p-4 border-b border-ui-border flex justify-between items-center gap-3 bg-charcoal-light/20">
+                <div className="flex items-center space-x-2 min-w-0">
+                  <Terminal size={14} className="text-gold shrink-0" />
                   <h3 className="text-gold uppercase tracking-[0.2em] text-[11px] truncate">HL7 Inspect — {activeFile || 'None Selected'}</h3>
                 </div>
+                {hl7Content && (
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => { setSecurityTab('fhir'); setIsSecurityModalOpen(true); }}
+                      className="px-2 py-1 border border-gold/40 text-gold text-[9px] uppercase tracking-tight hover:bg-gold hover:text-charcoal"
+                    >
+                      FHIR
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setSecurityTab('phi'); setIsSecurityModalOpen(true); }}
+                      className="px-2 py-1 border border-gold/40 text-gold text-[9px] uppercase tracking-tight hover:bg-gold hover:text-charcoal"
+                    >
+                      PHI
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="flex-1 p-4 sm:p-6 technical-data text-[11px] leading-relaxed overflow-x-auto bg-black/20 min-h-[200px]">
                 {hl7Content ? hl7Content.split('\n').map((line, i) => (
@@ -575,6 +594,8 @@ export default function Dashboard() {
         isOpen={isSecurityModalOpen}
         onClose={() => setIsSecurityModalOpen(false)}
         runId={encryptionRunId}
+        initialTab={securityTab}
+        hl7Text={hl7Content}
       />
 
       <AnimatePresence>

@@ -127,7 +127,13 @@ cd frontend && npm run lint
 ## Environment Tokens
 
 - The dashboard expects `VITE_OPERATOR_TOKEN` to match the backend’s `OPERATOR_TOKEN`. Locally you can either let `start.sh` propagate the token (it mirrors `OPERATOR_TOKEN` into `VITE_OPERATOR_TOKEN` before spinning up Vite) or set both env vars manually: `export OPERATOR_TOKEN="<token>"` and `export VITE_OPERATOR_TOKEN="$OPERATOR_TOKEN"`.
-- When building the Docker image, pass the same token via `--build-arg OPERATOR_TOKEN=<token>` so the production bundle receives `VITE_OPERATOR_TOKEN` without rebuilding.
+- Pipeline, upload, download, and the compliance APIs reject requests that do not send `Authorization: Bearer <OPERATOR_TOKEN>`. `/api/health` stays open for readiness checks.
+- `ADMIN_TOKEN` is a separate bearer token for admin-only actions: clearing the audit log, and revealing a name from the pseudonym vault. The vault page asks for it at reveal time. It is not written into the frontend bundle.
+- When building the Docker image, pass the same operator token via `--build-arg OPERATOR_TOKEN=<token>` so the production bundle receives `VITE_OPERATOR_TOKEN`.
+
+## Novel features
+
+FHIR R4 export, a per-field PHI confidence report, and a reversible pseudonym vault are described in [FEATURES.md](FEATURES.md), including how to demo each one.
 
 ## Continuous Deployment
 

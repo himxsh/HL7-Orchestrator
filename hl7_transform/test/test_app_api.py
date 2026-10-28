@@ -14,8 +14,16 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from hl7_transform.pseudonym_vault import PseudonymVault
+
 os.environ["OPERATOR_TOKEN"] = "op-token"
 os.environ["ADMIN_TOKEN"] = "admin-token"
+
+_SAMPLE_HL7 = "\n".join([
+    r"MSH|^~\&|LAB|HOSP|EHR|HOSP|20261028120000||ORU^R01|MSG0001|P|2.5.1",
+    "PID|1||10000032^^^HOSP^MR||SHARMA^ANITA||19800101|F|||12 MG ROAD^^JAIPUR^RJ^302001",
+    "OBX|1|NM|2345-7^Glucose^LN||5.4|mmol/L||||F",
+])
 
 app_module = importlib.import_module("app")
 
@@ -39,6 +47,8 @@ class TestAppApi(unittest.TestCase):
         app_module._download_store.clear()
         app_module._encryption_results_store.clear()
         self.headers = {"Authorization": f"Bearer {os.environ['OPERATOR_TOKEN']}"}
+        self.admin_headers = {"Authorization": f"Bearer {os.environ['ADMIN_TOKEN']}"}
+        app_module.vault = PseudonymVault(self.temp_root / "vault.json", b"k" * 32)
         self.client = TestClient(app_module.app)
 
     def tearDown(self):
@@ -159,6 +169,54 @@ class TestAppApi(unittest.TestCase):
         signed_message = archive.read("patient_12345.hl7").decode("utf-8")
         self.assertIn("PID|1||12345^^^MANUAL^MR||", signed_message)
         self.assertIn("ZSH|1|SHA256|", signed_message)
+
+    def test_fhir_export_and_phi_report_require_operator(self):
+        missing = self.client.post("/api/fhir/export", json={"hl7": _SAMPLE_HL7})
+        self.assertEqual(missing.status_code, 401)
+
+        exported = self.client.post(
+            "/api/fhir/export",
+            json={"hl7": _SAMPLE_HL7},
+            headers=self.headers,
+        )
+        self.assertEqual(exported.status_code, 200)
+        self.assertEqual(exported.json()["resourceType"], "Bundle")
+
+        report = self.client.post(
+            "/api/phi-report",
+            json={"hl7": _SAMPLE_HL7},
+            headers=self.headers,
+        )
+        self.assertEqual(report.status_code, 200)
+        self.assertGreaterEqual(report.json()["summary"]["likely_phi"], 1)
+
+    def test_vault_reveal_is_admin_only(self):
+        enrolled = self.client.post(
+            "/api/vault/enroll",
+            json={"subject_id": "10000032", "original_name": "Zzqx Realperson"},
+            headers=self.headers,
+        )
+        self.assertEqual(enrolled.status_code, 200)
+        self.assertNotIn("Zzqx", enrolled.json()["pseudonym"])
+
+        denied = self.client.post(
+            "/api/vault/reveal",
+            json={"subject_id": "10000032", "reason": "continuity of care"},
+            headers=self.headers,
+        )
+        self.assertEqual(denied.status_code, 403)
+
+        revealed = self.client.post(
+            "/api/vault/reveal",
+            json={"subject_id": "10000032", "reason": "continuity of care"},
+            headers=self.admin_headers,
+        )
+        self.assertEqual(revealed.status_code, 200)
+        self.assertEqual(revealed.json()["original_name"], "Zzqx Realperson")
+
+        listing = self.client.get("/api/vault", headers=self.headers)
+        self.assertEqual(listing.status_code, 200)
+        self.assertNotIn("Zzqx Realperson", listing.text)
 
 
 if __name__ == "__main__":
