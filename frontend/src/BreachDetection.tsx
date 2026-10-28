@@ -4,6 +4,7 @@ import { ShieldAlert, Search, AlertTriangle, CheckCircle2, Info, XCircle } from 
 import Header from './Header';
 import Footer from './Footer';
 import { useState } from 'react';
+import { fetchWithAuth } from './api';
 
 interface Finding {
   severity: string;
@@ -39,7 +40,13 @@ export const BreachDetectionContent = ({ isModal = false }: { isModal?: boolean 
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/breach-scan', { method: 'POST' });
+      const res = await fetchWithAuth('/api/breach-scan', { method: 'POST' });
+      if (!res.ok) {
+        setError(res.status === 401
+          ? 'Operator token missing. Set OPERATOR_TOKEN and VITE_OPERATOR_TOKEN.'
+          : 'Breach scan failed.');
+        return;
+      }
       const json = await res.json();
       setResult(json);
     } catch {

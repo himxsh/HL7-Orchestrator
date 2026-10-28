@@ -3,6 +3,7 @@ import { Lock, Clock, ShieldCheck, BarChart3, RefreshCw } from 'lucide-react';
 import Header from './Header';
 import Footer from './Footer';
 import { useState, useEffect } from 'react';
+import { fetchWithAuth } from './api';
 
 interface AlgoResult {
   name: string;
@@ -39,7 +40,13 @@ export const EncryptionComparisonContent = ({ isModal = false, runId }: { isModa
       const url = runId
         ? `/api/encryption-comparison?run_id=${encodeURIComponent(runId)}`
         : '/api/encryption-comparison';
-      const res = await fetch(url);
+      const res = await fetchWithAuth(url);
+      if (!res.ok) {
+        setError(res.status === 401
+          ? 'Operator token missing. Set OPERATOR_TOKEN and VITE_OPERATOR_TOKEN.'
+          : 'Could not load encryption results.');
+        return;
+      }
       const json = await res.json();
       setData(json.results || []);
     } catch (e) {

@@ -3,6 +3,7 @@ import { ShieldCheck, CheckCircle2, AlertTriangle, XCircle, RefreshCw } from 'lu
 import Header from './Header';
 import Footer from './Footer';
 import { useState, useEffect } from 'react';
+import { fetchWithAuth } from './api';
 
 interface Check {
   id: string;
@@ -51,7 +52,8 @@ export const ComplianceScoreContent = ({ isModal = false }: { isModal?: boolean 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/compliance-score');
+      const res = await fetchWithAuth('/api/compliance-score');
+      if (!res.ok) return;
       setData(await res.json());
     } catch { } finally { setLoading(false); }
   };

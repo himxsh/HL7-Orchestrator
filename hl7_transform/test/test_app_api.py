@@ -4,6 +4,7 @@ Tests for the FastAPI application layer.
 import importlib
 import io
 import json
+import os
 import tempfile
 import unittest
 import uuid
@@ -12,6 +13,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+
+os.environ["OPERATOR_TOKEN"] = "op-token"
+os.environ["ADMIN_TOKEN"] = "admin-token"
 
 app_module = importlib.import_module("app")
 
@@ -34,6 +38,7 @@ class TestAppApi(unittest.TestCase):
         self._temp_root_patch.start()
         app_module._download_store.clear()
         app_module._encryption_results_store.clear()
+        self.headers = {"Authorization": f"Bearer {os.environ['OPERATOR_TOKEN']}"}
         self.client = TestClient(app_module.app)
 
     def tearDown(self):
@@ -42,10 +47,23 @@ class TestAppApi(unittest.TestCase):
         self._temp_root_patch.stop()
         self._temp_dir.cleanup()
 
+    def test_health_stays_public(self):
+        response = self.client.get("/api/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "ok")
+
+    def test_upload_requires_operator_token(self):
+        response = self.client.post(
+            "/api/upload",
+            files={"file": ("patients.csv", b"id,value\n1,2\n", "text/csv")},
+        )
+        self.assertEqual(response.status_code, 401)
+
     def test_upload_accepts_valid_csv(self):
         response = self.client.post(
             "/api/upload",
             files={"file": ("patients.csv", b"id,value\n1,2\n", "text/csv")},
+            headers=self.headers,
         )
 
         self.assertEqual(response.status_code, 200)
@@ -62,6 +80,7 @@ class TestAppApi(unittest.TestCase):
         response = self.client.post(
             "/api/upload",
             files={"file": ("patients.txt", b"bad", "text/plain")},
+            headers=self.headers,
         )
 
         self.assertEqual(response.status_code, 400)
@@ -71,6 +90,7 @@ class TestAppApi(unittest.TestCase):
         response = self.client.post(
             "/api/upload/not-a-uuid",
             files={"file": ("patients.csv", b"id\n1\n", "text/csv")},
+            headers=self.headers,
         )
 
         self.assertEqual(response.status_code, 404)
@@ -83,8 +103,8 @@ class TestAppApi(unittest.TestCase):
             "created": app_module.time.time(),
         }
 
-        first = self.client.get(f"/api/download/{token}")
-        second = self.client.get(f"/api/download/{token}")
+        first = self.client.get(f"/api/download/{token}", headers=self.headers)
+        second = self.client.get(f"/api/download/{token}", headers=self.headers)
 
         self.assertEqual(first.status_code, 200)
         self.assertEqual(first.content, b"zip-bytes")
@@ -106,7 +126,7 @@ class TestAppApi(unittest.TestCase):
         }
 
         with patch.object(app_module.time, "sleep", return_value=None):
-            response = self.client.post("/api/run-single", json=payload)
+            response = self.client.post("/api/run-single", json=payload, headers=self.headers)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["content-type"], "text/event-stream; charset=utf-8")
@@ -128,7 +148,10 @@ class TestAppApi(unittest.TestCase):
         self.assertTrue(success_event["downloadToken"])
         self.assertEqual(len(success_event["encryptionResults"]), 4)
 
-        download = self.client.get(f"/api/download/{success_event['downloadToken']}")
+        download = self.client.get(
+            f"/api/download/{success_event['downloadToken']}",
+            headers=self.headers,
+        )
         self.assertEqual(download.status_code, 200)
 
         archive = zipfile.ZipFile(io.BytesIO(download.content))

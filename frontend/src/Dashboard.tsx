@@ -18,6 +18,7 @@ import { useNavigate, useLocation, useBlocker } from 'react-router-dom';
 import SecurityModal from './SecurityModal';
 import Footer from './Footer';
 import { getStoredTheme, toggleTheme, type ThemeMode } from './theme';
+import { fetchWithAuth } from './api';
 
 // --- Types ---
 interface PatientRecord {
@@ -171,7 +172,7 @@ export default function Dashboard() {
         setTableHeaders(['Subject ID', 'Pseudonym', 'Sex', 'Observations', 'Output']);
         headersInitialized.current = true;
 
-        response = await fetch('/api/run-single', {
+        response = await fetchWithAuth('/api/run-single', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(locState.singlePatientData),
@@ -183,7 +184,7 @@ export default function Dashboard() {
           headersInitialized.current = true;
         }
 
-        response = await fetch('/api/run', {
+        response = await fetchWithAuth('/api/run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ dataset, runId: locState.runId || '', filePath: locState.filePath }),
@@ -191,7 +192,10 @@ export default function Dashboard() {
       }
 
       if (!response.ok) {
-        throw new Error(`Pipeline request failed with status ${response.status}`);
+        const hint = response.status === 401
+          ? 'Pipeline request was rejected. Set OPERATOR_TOKEN and VITE_OPERATOR_TOKEN to the same value.'
+          : `Pipeline request failed with status ${response.status}`;
+        throw new Error(hint);
       }
 
       const reader = response.body?.getReader();
@@ -313,10 +317,26 @@ export default function Dashboard() {
     setHl7Content(record.content || 'Content unavailable (Stateless run finished).');
   };
 
-  const downloadAllHL7 = () => {
-    if (downloadToken) {
-      window.location.href = `/api/download/${downloadToken}`;
+  const downloadAllHL7 = async () => {
+    if (!downloadToken) return;
+    const response = await fetchWithAuth(`/api/download/${downloadToken}`);
+    if (!response.ok) {
+      setErrorMessage(
+        response.status === 401
+          ? 'Download was rejected. Set OPERATOR_TOKEN and VITE_OPERATOR_TOKEN to the same value.'
+          : `Download failed with status ${response.status}`,
+      );
+      return;
     }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'hl7-output.zip';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
   };
 
   const isMIMIC = selectedDataset.toLowerCase().includes('mimic');
@@ -551,9 +571,9 @@ export default function Dashboard() {
         </main>
       </div>
 
-      <SecurityModal 
-        isOpen={isSecurityModalOpen} 
-        onClose={() => setIsSecurityModalOpen(false)} 
+      <SecurityModal
+        isOpen={isSecurityModalOpen}
+        onClose={() => setIsSecurityModalOpen(false)}
         runId={encryptionRunId}
       />
 

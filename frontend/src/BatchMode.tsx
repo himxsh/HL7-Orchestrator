@@ -22,6 +22,7 @@ import { motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import Header from './Header';
 import Footer from './Footer';
+import { fetchWithAuth } from './api';
 
 // MIMIC required files
 const MIMIC_FILES = [
@@ -78,7 +79,7 @@ export default function BatchMode() {
         url = `/api/upload/${mimicRunId}`;
       }
 
-      const response = await fetch(url, { method: 'POST', body: formData });
+      const response = await fetchWithAuth(url, { method: 'POST', body: formData });
 
       if (response.status === 413) {
         setUploadError(`${file.name} exceeds the ${MAX_FILE_SIZE_MB}MB server limit.`);
@@ -122,7 +123,7 @@ export default function BatchMode() {
     formData.append('file', file);
 
     try {
-      const response = await fetch('/api/upload', { method: 'POST', body: formData });
+      const response = await fetchWithAuth('/api/upload', { method: 'POST', body: formData });
 
       if (response.status === 413) {
         setUploadError(`${file.name} exceeds the ${MAX_FILE_SIZE_MB}MB server limit.`);
